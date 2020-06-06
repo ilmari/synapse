@@ -1706,6 +1706,59 @@ def make_in_list_sql_clause(
         return "%s IN (%s)" % (column, ",".join("?" for _ in iterable)), list(iterable)
 
 
+def make_multi_column_in_list_sql_clause(
+    database_engine: BaseDatabaseEngine,
+    columns: Iterable[str],
+    iterable: Iterable[Tuple],
+) -> Tuple[str, list]:
+    """Returns an SQL clause that checks if the given columns are in
+    the iterable of tuples.
+
+    On PostgreSQL and on SQLite > 3.15.0, this expands to `(a, b) IN
+    (VALUES (?, ?), (?, ?), ...)`, whereas on older SQLite versions it
+    expands to `((a = ? AND b = ?) OR (a = ? AND b = ?) ...)`.
+
+    Args:
+        database_engine
+        columns: Iterable of column names
+        iterable: The tuples of values to check the columns against
+
+    Returns:
+        A tuple of SQL query and the args
+
+    """
+
+    if database_engine.supports_tuple_comparison:
+        # PostgreSQL can't resolve the comparison operator to use when
+        # the array contains strings, as they have type "unknown",
+        # so we need to use the IN () form regardless.
+        #
+        # if database_engine.supports_using_any_list:
+        #    return "(%s) = ANY(?)" % (",".join(columns),), [list(iterable)]
+        # else:
+        return (
+            # PostgreSQL doesn't require `VALUES` here, but SQLite
+            # does, and it works on both
+            "(%s) IN (VALUES %s)"
+            % (
+                ",".join(columns),
+                ",".join("(%s)" % (",".join("?" for _ in columns),) for _ in iterable),
+            ),
+            [val for tup in iterable for val in tup],
+        )
+    else:
+        return (
+            "(%s)"
+            % (
+                " OR ".join(
+                    "(%s)" % (" AND ".join("%s = ?" % (col,) for col in columns))
+                    for _ in iterable
+                ),
+            ),
+            [val for tup in iterable for val in tup],
+        )
+
+
 KV = TypeVar("KV")
 
 
