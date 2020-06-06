@@ -77,7 +77,9 @@ class StateGroupBackgroundUpdateStore(SQLBaseStore):
     ):
         results = {group: {} for group in groups}
 
-        where_clause, where_args = state_filter.make_sql_filter_clause()
+        where_clause, where_args = state_filter.make_sql_filter_clause(
+            self.database_engine
+        )
 
         # Unless the filter clause is empty, we're going to append it after an
         # existing where clause

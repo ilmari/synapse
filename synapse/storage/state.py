@@ -21,6 +21,11 @@ import attr
 from synapse.api.constants import EventTypes
 from synapse.events import EventBase
 from synapse.types import StateMap
+from synapse.storage.database import (
+    make_in_list_sql_clause,
+    make_multi_column_in_list_sql_clause,
+)
+from synapse.storage.engines import BaseDatabaseEngine
 
 logger = logging.getLogger(__name__)
 
@@ -165,13 +170,15 @@ class StateFilter(object):
                 include_others=True,
             )
 
-    def make_sql_filter_clause(self) -> Tuple[str, List[str]]:
+    def make_sql_filter_clause(
+        self, database_engine: BaseDatabaseEngine
+    ) -> Tuple[str, List[str]]:
         """Converts the filter to an SQL clause.
 
         For example:
 
             f = StateFilter.from_types([("m.room.create", "")])
-            clause, args = f.make_sql_filter_clause()
+            clause, args = f.make_sql_filter_clause(database_engine)
             clause == "(type = ? AND state_key = ?)"
             args == ['m.room.create', '']
 
@@ -194,15 +201,28 @@ class StateFilter(object):
 
         # First we build up a lost of clauses for each type/state_key combo
         clauses = []
+        type_args = []
+        type_state_args = []
+
         for etype, state_keys in self.types.items():
             if state_keys is None:
-                clauses.append("(type = ?)")
-                where_args.append(etype)
+                type_args.append(etype)
                 continue
 
             for state_key in state_keys:
-                clauses.append("(type = ? AND state_key = ?)")
-                where_args.extend((etype, state_key))
+                type_state_args.append((etype, state_key))
+
+        if type_args:
+            clause, args = make_in_list_sql_clause(database_engine, "type", type_args)
+            clauses.append(clause)
+            where_args.extend(args)
+
+        if type_state_args:
+            clause, args = make_multi_column_in_list_sql_clause(
+                database_engine, ("type", "state_key"), type_state_args,
+            )
+            clauses.append(clause)
+            where_args.extend(args)
 
         # This will match anything that appears in `self.types`
         where_clause = " OR ".join(clauses)

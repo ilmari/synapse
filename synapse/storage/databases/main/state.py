@@ -205,7 +205,9 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
             defer.Deferred[StateMap[str]]: Map from type/state_key to event ID.
         """
 
-        where_clause, where_args = state_filter.make_sql_filter_clause()
+        where_clause, where_args = state_filter.make_sql_filter_clause(
+            self.database_engine
+        )
 
         if not where_clause:
             # We delegate to the cached version
