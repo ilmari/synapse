@@ -202,7 +202,9 @@ def _make_generic_sql_bound(
     )
 
 
-def filter_to_clause(event_filter: Filter) -> Tuple[str, List[str]]:
+def filter_to_clause(
+    event_filter: Filter, database_engine: BaseDatabaseEngine
+) -> Tuple[str, List[str]]:
     # NB: This may create SQL clauses that don't optimise well (and we don't
     # have indices on all possible clauses). E.g. it may create
     # "room_id == X AND room_id != X", which postgres doesn't optimise.
@@ -214,24 +216,33 @@ def filter_to_clause(event_filter: Filter) -> Tuple[str, List[str]]:
     args = []
 
     if event_filter.types:
-        clauses.append("(%s)" % " OR ".join("type = ?" for _ in event_filter.types))
-        args.extend(event_filter.types)
+        clause, types = make_in_list_sql_clause(
+            database_engine, "type", event_filter.types
+        )
+        clauses.append(clause)
+        args.extend(types)
 
     for typ in event_filter.not_types:
         clauses.append("type != ?")
         args.append(typ)
 
     if event_filter.senders:
-        clauses.append("(%s)" % " OR ".join("sender = ?" for _ in event_filter.senders))
-        args.extend(event_filter.senders)
+        clause, senders = make_in_list_sql_clause(
+            database_engine, "sender", event_filter.senders
+        )
+        clauses.append(clause)
+        args.extend(senders)
 
     for sender in event_filter.not_senders:
         clauses.append("sender != ?")
         args.append(sender)
 
     if event_filter.rooms:
-        clauses.append("(%s)" % " OR ".join("room_id = ?" for _ in event_filter.rooms))
-        args.extend(event_filter.rooms)
+        clause, rooms = make_in_list_sql_clause(
+            database_engine, "sender", event_filter.rooms
+        )
+        clauses.append(clause)
+        args.extend(rooms)
 
     for room_id in event_filter.not_rooms:
         clauses.append("room_id != ?")
@@ -246,8 +257,11 @@ def filter_to_clause(event_filter: Filter) -> Tuple[str, List[str]]:
     # event_filter.check_fields apply it, which is not as efficient but makes the
     # implementation simpler.
     if event_filter.labels:
-        clauses.append("(%s)" % " OR ".join("label = ?" for _ in event_filter.labels))
-        args.extend(event_filter.labels)
+        clause, labels = make_in_list_sql_clause(
+            database_engine, "labels", event_filter.labels
+        )
+        clauses.append(clause)
+        args.extend(labels)
 
     return " AND ".join(clauses), args
 
@@ -966,7 +980,9 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             engine=self.database_engine,
         )
 
-        filter_clause, filter_args = filter_to_clause(event_filter)
+        filter_clause, filter_args = filter_to_clause(
+            event_filter, self.database_engine
+        )
 
         if filter_clause:
             bounds += " AND " + filter_clause
