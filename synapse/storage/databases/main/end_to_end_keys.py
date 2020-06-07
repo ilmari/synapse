@@ -22,7 +22,10 @@ from twisted.enterprise.adbapi import Connection
 
 from synapse.logging.opentracing import log_kv, set_tag, trace
 from synapse.storage._base import SQLBaseStore, db_to_json
-from synapse.storage.database import make_in_list_sql_clause
+from synapse.storage.database import (
+    make_in_list_sql_clause,
+    make_multi_column_in_list_sql_clause,
+)
 from synapse.util import json_encoder
 from synapse.util.caches.descriptors import cached, cachedList
 from synapse.util.iterutils import batch_iter
@@ -408,20 +411,20 @@ class EndToEndKeyWorkerStore(SQLBaseStore):
                 devices[(user_id, device_id)] = key_type
 
         for batch in batch_iter(devices.keys(), size=100):
-            sql = """
+            batch_clause, batch_params = make_multi_column_in_list_sql_clause(
+                txn.database_engine, ("target_user_id", "target_device_id"), batch
+            )
+            sql = (
+                """
                 SELECT target_user_id, target_device_id, key_id, signature
                   FROM e2e_cross_signing_signatures
                  WHERE user_id = ?
                    AND (%s)
-            """ % (
-                " OR ".join(
-                    "(target_user_id = ? AND target_device_id = ?)" for _ in batch
-                )
+                """
+                % batch_clause
             )
             query_params = [from_user_id]
-            for item in batch:
-                # item is a (user_id, device_id) tuple
-                query_params.extend(item)
+            query_params.extend(batch_params)
 
             txn.execute(sql, query_params)
             rows = self.db_pool.cursor_to_dict(txn)
